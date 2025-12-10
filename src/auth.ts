@@ -3,6 +3,7 @@ import { Client } from '@microsoft/microsoft-graph-client';
 
 export class AuthProvider {
     private credential: UsernamePasswordCredential | ClientSecretCredential | null = null;
+    private isClientSecretAuth: boolean = false;
 
     private getCredential(): UsernamePasswordCredential | ClientSecretCredential {
         if (!this.credential) {
@@ -18,6 +19,7 @@ export class AuthProvider {
                     process.env.CLIENT_ID,
                     process.env.CLIENT_SECRET
                 );
+                this.isClientSecretAuth = true;
             } else if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
                 // 回退到 UsernamePasswordCredential（需要應用程式設定為公開客戶端）
                 console.log('使用 UsernamePasswordCredential 認證（需要應用程式設定為公開客戶端）');
@@ -27,6 +29,7 @@ export class AuthProvider {
                     process.env.PROXY_USERNAME,
                     process.env.PROXY_PASSWORD
                 );
+                this.isClientSecretAuth = false;
             } else {
                 throw new Error('缺少認證資訊: 請設定 CLIENT_SECRET 或 PROXY_USERNAME + PROXY_PASSWORD');
             }
@@ -36,10 +39,16 @@ export class AuthProvider {
 
     async getAccessToken(): Promise<string> {
         const credential = this.getCredential();
-        const scopes = [
-            'https://graph.microsoft.com/Files.Read.All',
-            'https://graph.microsoft.com/Sites.Read.All'
-        ];
+        
+        // Client Secret Credential（應用程式認證流程）必須使用 /.default 格式
+        // UsernamePasswordCredential（委派認證流程）可以使用具體的權限範圍
+        const scopes = this.isClientSecretAuth
+            ? ['https://graph.microsoft.com/.default']  // 應用程式認證流程
+            : [  // 委派認證流程
+                'https://graph.microsoft.com/Files.Read.All',
+                'https://graph.microsoft.com/Sites.Read.All'
+            ];
+        
         const response = await credential.getToken(scopes);
         return response?.token || '';
     }
