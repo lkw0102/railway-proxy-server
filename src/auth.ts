@@ -38,28 +38,63 @@ export class AuthProvider {
     }
 
     async getAccessToken(): Promise<string> {
-        const credential = this.getCredential();
-        
-        // Client Secret Credential（應用程式認證流程）必須使用 /.default 格式
-        // UsernamePasswordCredential（委派認證流程）可以使用具體的權限範圍
-        const scopes = this.isClientSecretAuth
-            ? ['https://graph.microsoft.com/.default']  // 應用程式認證流程
-            : [  // 委派認證流程
-                'https://graph.microsoft.com/Files.Read.All',
-                'https://graph.microsoft.com/Sites.Read.All'
-            ];
-        
-        const response = await credential.getToken(scopes);
-        return response?.token || '';
+        try {
+            const credential = this.getCredential();
+            
+            // Client Secret Credential（應用程式認證流程）必須使用 /.default 格式
+            // UsernamePasswordCredential（委派認證流程）可以使用具體的權限範圍
+            const scopes = this.isClientSecretAuth
+                ? ['https://graph.microsoft.com/.default']  // 應用程式認證流程
+                : [  // 委派認證流程
+                    'https://graph.microsoft.com/Files.Read.All',
+                    'https://graph.microsoft.com/Sites.Read.All'
+                ];
+            
+            console.log(`取得存取權杖，認證類型: ${this.isClientSecretAuth ? 'Client Secret' : 'Username/Password'}`);
+            console.log(`Scope: ${scopes.join(', ')}`);
+            
+            const response = await credential.getToken(scopes);
+            
+            if (!response || !response.token) {
+                throw new Error('無法取得存取權杖：回應為空');
+            }
+            
+            console.log('成功取得存取權杖');
+            return response.token;
+        } catch (error: any) {
+            console.error('取得存取權杖時發生錯誤:', error);
+            console.error('錯誤詳情:', {
+                message: error?.message,
+                name: error?.name,
+                code: error?.code,
+                statusCode: error?.statusCode,
+                errorCode: error?.errorCode,
+                errorDescription: error?.errorDescription
+            });
+            
+            // 提供更詳細的錯誤訊息
+            if (error?.message) {
+                throw new Error(`認證失敗: ${error.message}`);
+            } else if (error?.errorCode) {
+                throw new Error(`認證失敗 (${error.errorCode}): ${error.errorDescription || '未知錯誤'}`);
+            } else {
+                throw new Error(`認證失敗: ${JSON.stringify(error)}`);
+            }
+        }
     }
 
     async getGraphClient(): Promise<Client> {
-        const token = await this.getAccessToken();
-        return Client.init({
-            authProvider: (done) => {
-                done(null, token);
-            }
-        });
+        try {
+            const token = await this.getAccessToken();
+            return Client.init({
+                authProvider: (done) => {
+                    done(null, token);
+                }
+            });
+        } catch (error: any) {
+            console.error('建立 Graph Client 時發生錯誤:', error);
+            throw new Error(`無法建立 Graph Client: ${error.message || '未知錯誤'}`);
+        }
     }
 }
 
