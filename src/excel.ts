@@ -3,6 +3,97 @@ import { StudentRow } from './types';
 import { AuthProvider } from './auth';
 import { UsernamePasswordCredential } from '@azure/identity';
 import { Client } from '@microsoft/microsoft-graph-client';
+import { Readable } from 'stream';
+
+/**
+ * 將 ReadableStream 轉換為 ArrayBuffer
+ */
+async function streamToArrayBuffer(stream: ReadableStream | Readable): Promise<ArrayBuffer> {
+    // 如果是 Node.js Readable stream
+    if (stream instanceof Readable) {
+        const chunks: Buffer[] = [];
+        return new Promise((resolve, reject) => {
+            stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+            stream.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                resolve(new Uint8Array(buffer).buffer);
+            });
+            stream.on('error', reject);
+        });
+    }
+    
+    // 如果是 Web ReadableStream
+    if (stream instanceof ReadableStream) {
+        const reader = stream.getReader();
+        const chunks: Uint8Array[] = [];
+        
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+            }
+            
+            // 計算總長度
+            const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+            const result = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+                result.set(chunk, offset);
+                offset += chunk.length;
+            }
+            
+            return result.buffer;
+        } finally {
+            reader.releaseLock();
+        }
+    }
+    
+    throw new Error('不支援的 stream 類型');
+}
+
+/**
+ * 將 Graph API 返回的內容轉換為 ArrayBuffer
+ */
+async function convertToArrayBuffer(response: any): Promise<ArrayBuffer> {
+    // 檢查是否為 ArrayBuffer
+    if (response instanceof ArrayBuffer) {
+        return response;
+    }
+    
+    // 檢查是否為 Buffer
+    if (Buffer.isBuffer(response)) {
+        return new Uint8Array(response).buffer;
+    }
+    
+    // 檢查是否為 Uint8Array
+    if (response instanceof Uint8Array) {
+        return response.buffer as ArrayBuffer;
+    }
+    
+    // 檢查是否為 ReadableStream (Web)
+    if (response instanceof ReadableStream) {
+        return await streamToArrayBuffer(response);
+    }
+    
+    // 檢查是否為 Node.js Readable stream
+    if (response instanceof Readable) {
+        return await streamToArrayBuffer(response);
+    }
+    
+    // 檢查是否有 arrayBuffer 方法（某些 Response 物件）
+    if (response && typeof response.arrayBuffer === 'function') {
+        return await response.arrayBuffer();
+    }
+    
+    // 最後嘗試：轉換為 Buffer
+    try {
+        const buffer = Buffer.from(response as any);
+        return new Uint8Array(buffer).buffer;
+    } catch (error) {
+        throw new Error(`無法轉換回應為 ArrayBuffer。類型: ${typeof response}, 構造函數: ${response?.constructor?.name || 'unknown'}`);
+    }
+}
 
 /**
  * 打印檔案資訊（大小、前幾個字節等）
@@ -61,17 +152,7 @@ export async function downloadExcelFromSharePoint(
                     const response = await graphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
                     
                     // Graph API 可能返回 Stream、Buffer 或 ArrayBuffer，需要統一轉換為 ArrayBuffer
-                    if (response instanceof ArrayBuffer) {
-                        fileContent = response;
-                    } else if (Buffer.isBuffer(response)) {
-                        fileContent = new Uint8Array(response).buffer;
-                    } else if (response instanceof Uint8Array) {
-                        fileContent = response.buffer as ArrayBuffer;
-                    } else {
-                        // 嘗試轉換為 Buffer 再轉為 ArrayBuffer
-                        const buffer = Buffer.from(response as any);
-                        fileContent = new Uint8Array(buffer).buffer;
-                    }
+                    fileContent = await convertToArrayBuffer(response);
                     
                     console.log('成功使用 Graph API 取得檔案');
                     logFileInfo(fileContent, 'Graph API');
@@ -109,17 +190,7 @@ export async function downloadExcelFromSharePoint(
                         const response = await delegateGraphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
                         
                         // Graph API 可能返回 Stream、Buffer 或 ArrayBuffer，需要統一轉換為 ArrayBuffer
-                        if (response instanceof ArrayBuffer) {
-                            fileContent = response;
-                        } else if (Buffer.isBuffer(response)) {
-                            fileContent = new Uint8Array(response).buffer;
-                        } else if (response instanceof Uint8Array) {
-                            fileContent = response.buffer as ArrayBuffer;
-                        } else {
-                            // 嘗試轉換為 Buffer 再轉為 ArrayBuffer
-                            const buffer = Buffer.from(response as any);
-                            fileContent = new Uint8Array(buffer).buffer;
-                        }
+                        fileContent = await convertToArrayBuffer(response);
                         
                         console.log('成功使用委派認證取得檔案');
                         logFileInfo(fileContent, '委派認證 (UsernamePasswordCredential)');
