@@ -4,6 +4,38 @@ import { AuthProvider } from './auth';
 import { UsernamePasswordCredential } from '@azure/identity';
 import { Client } from '@microsoft/microsoft-graph-client';
 
+/**
+ * 打印檔案資訊（大小、前幾個字節等）
+ */
+function logFileInfo(fileContent: ArrayBuffer, source: string): void {
+    const size = fileContent.byteLength;
+    const sizeKB = (size / 1024).toFixed(2);
+    const sizeMB = (size / 1024 / 1024).toFixed(2);
+    
+    console.log(`📄 檔案資訊 (${source}):`);
+    console.log(`   大小: ${size} bytes (${sizeKB} KB${size > 1024 * 1024 ? ` / ${sizeMB} MB` : ''})`);
+    
+    // 打印檔案的前 100 個字節（十六進制）
+    const previewBytes = new Uint8Array(fileContent.slice(0, Math.min(100, size)));
+    const hexPreview = Array.from(previewBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`   前 100 bytes (hex): ${hexPreview.substring(0, 200)}${hexPreview.length > 200 ? '...' : ''}`);
+    
+    // 檢查檔案格式
+    if (previewBytes[0] === 0x50 && previewBytes[1] === 0x4B) {
+        console.log('   ✅ 檔案格式: Excel (.xlsx) 格式（ZIP 壓縮）');
+    } else if (previewBytes[0] === 0xD0 && previewBytes[1] === 0xCF) {
+        console.log('   ⚠️  檔案格式: 可能是舊版 Excel (.xls) 格式');
+    } else {
+        console.log(`   ⚠️  檔案格式: 未知格式（前兩個字節: 0x${previewBytes[0].toString(16)} 0x${previewBytes[1].toString(16)}）`);
+    }
+    
+    // 打印檔案的前幾個字節（ASCII，如果可讀）
+    const asciiPreview = Array.from(previewBytes.slice(0, 50))
+        .map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.')
+        .join('');
+    console.log(`   前 50 bytes (ASCII): ${asciiPreview}`);
+}
+
 export async function downloadExcelFromSharePoint(
     filePath: string
 ): Promise<StudentRow[]> {
@@ -29,6 +61,7 @@ export async function downloadExcelFromSharePoint(
                     const response = await graphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
                     fileContent = response as ArrayBuffer;
                     console.log('成功使用 Graph API 取得檔案');
+                    logFileInfo(fileContent, 'Graph API');
                 } catch (graphError: any) {
                     console.warn('Graph API 失敗（可能是應用程式認證不支援），嘗試使用委派認證:', graphError.message);
                     
@@ -63,6 +96,7 @@ export async function downloadExcelFromSharePoint(
                         const response = await delegateGraphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
                         fileContent = response as ArrayBuffer;
                         console.log('成功使用委派認證取得檔案');
+                        logFileInfo(fileContent, '委派認證 (UsernamePasswordCredential)');
                     } else {
                         throw new Error(`無法使用 Graph API 取得 /s/ 格式的共享檔案。Graph API /shares/ 端點需要委派權限，但當前使用應用程式認證。請設定 PROXY_USERNAME 和 PROXY_PASSWORD 以使用委派認證。原始錯誤: ${graphError.message}`);
                     }
@@ -93,6 +127,8 @@ export async function downloadExcelFromSharePoint(
                 }
                 
                 fileContent = await response.arrayBuffer();
+                console.log('成功使用 SharePoint REST API 取得檔案');
+                logFileInfo(fileContent, 'SharePoint REST API');
             }
         } else {
             throw new Error('不支援的檔案路徑格式');
