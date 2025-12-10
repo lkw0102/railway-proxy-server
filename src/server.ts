@@ -22,17 +22,51 @@ console.log('    PROXY_PASSWORD:', process.env.PROXY_PASSWORD || '❌ 未設定'
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-// 中介軟體
-app.use(helmet()); // 安全性標頭
+// CORS 設定 - 必須在其他中介軟體之前
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(o => o) || ['*'];
+console.log('🌐 CORS 允許的來源:', allowedOrigins);
+
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-    credentials: true
+    origin: (origin, callback) => {
+        // 允許所有來源（如果設定為 '*'）或檢查是否在允許列表中
+        if (allowedOrigins.includes('*') || !origin) {
+            callback(null, true);
+        } else if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            // 允許 SharePoint 來源
+            if (origin && origin.includes('sharepoint.com')) {
+                console.log(`✅ 允許 SharePoint 來源: ${origin}`);
+                callback(null, true);
+            } else {
+                console.warn(`⚠️  CORS 拒絕來源: ${origin}`);
+                callback(null, true); // 暫時允許所有來源以便調試
+            }
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['Content-Type', 'Content-Length']
 }));
+
+// 中介軟體
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+})); // 安全性標頭
 app.use(express.json());
 
 // 請求日誌中介軟體（用於診斷）
 app.use((req: Request, res: Response, next: Function) => {
     console.log(`📥 收到請求: ${req.method} ${req.path} - ${new Date().toISOString()}`);
+    console.log(`📍 Origin: ${req.headers.origin || '未設定'}`);
+    
+    // 確保所有回應都設置 CORS header
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+    
     next();
 });
 
@@ -45,8 +79,20 @@ app.get('/health', (req: Request, res: Response) => {
     });
 });
 
+// OPTIONS 預檢請求處理
+app.options('/api/getStudentGrade', (req: Request, res: Response) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.status(200).end();
+});
+
 // 主要 API 端點
 app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
+    // 確保 CORS 標頭已設定
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
     try {
         const { studentId, excelFilePath } = req.body as StudentGradeRequest;
 
@@ -93,9 +139,34 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('處理請求時發生錯誤:', error);
+        console.error('錯誤堆疊:', error.stack);
+        
+        // 確保 CORS 標頭在錯誤回應中也設定
+        res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        
+        // 提供更詳細的錯誤訊息
+        let errorMessage = '伺服器內部錯誤';
+        if (error.message) {
+            errorMessage = error.message;
+        } else if (typeof error === 'string') {
+            errorMessage = error;
+        } else if (error.error) {
+            errorMessage = error.error;
+        }
+        
+        // 記錄完整的錯誤資訊
+        console.error('錯誤詳情:', {
+            message: errorMessage,
+            name: error.name,
+            stack: error.stack,
+            code: error.code,
+            statusCode: error.statusCode
+        });
+        
         res.status(500).json({
             success: false,
-            error: error.message || '伺服器內部錯誤'
+            error: errorMessage
         } as StudentGradeResponse);
     }
 });
@@ -103,6 +174,11 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 // 錯誤處理中介軟體
 app.use((err: Error, req: Request, res: Response, next: Function) => {
     console.error('未處理的錯誤:', err);
+    
+    // 確保 CORS 標頭在錯誤回應中也設定
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
     res.status(500).json({
         success: false,
         error: '伺服器內部錯誤'
