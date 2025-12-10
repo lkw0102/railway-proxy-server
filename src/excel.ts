@@ -1,6 +1,8 @@
 import * as XLSX from 'xlsx';
 import { StudentRow } from './types';
 import { AuthProvider } from './auth';
+import { UsernamePasswordCredential } from '@azure/identity';
+import { Client } from '@microsoft/microsoft-graph-client';
 
 export async function downloadExcelFromSharePoint(
     filePath: string
@@ -11,17 +13,60 @@ export async function downloadExcelFromSharePoint(
         if (filePath.includes('sharepoint.com/:x:/')) {
             // 處理共享連結格式
             if (filePath.includes('sharepoint.com/:x:/s/')) {
-                // /s/ 格式 - 使用 Graph API shares
-                const authProvider = new AuthProvider();
-                const graphClient = await authProvider.getGraphClient();
-                
-                const shareId = Buffer.from(filePath).toString('base64')
-                    .replace(/=+$/, '')
-                    .replace(/\//g, '_')
-                    .replace(/\+/g, '-');
-                
-                const response = await graphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
-                fileContent = response as ArrayBuffer;
+                // /s/ 格式 - Graph API /shares/ 端點需要委派權限
+                // 如果使用應用程式認證流程，改用 SharePoint REST API
+                // 先嘗試使用 Graph API（如果使用委派認證）
+                try {
+                    const authProvider = new AuthProvider();
+                    const graphClient = await authProvider.getGraphClient();
+                    
+                    const shareId = Buffer.from(filePath).toString('base64')
+                        .replace(/=+$/, '')
+                        .replace(/\//g, '_')
+                        .replace(/\+/g, '-');
+                    
+                    console.log(`嘗試使用 Graph API 取得 /s/ 格式的共享檔案`);
+                    const response = await graphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
+                    fileContent = response as ArrayBuffer;
+                    console.log('成功使用 Graph API 取得檔案');
+                } catch (graphError: any) {
+                    console.warn('Graph API 失敗（可能是應用程式認證不支援），嘗試使用委派認證:', graphError.message);
+                    
+                    // Graph API /shares/ 端點需要委派權限
+                    // 如果使用應用程式認證失敗，改用委派認證（UsernamePasswordCredential）
+                    if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
+                        console.log('使用委派認證（UsernamePasswordCredential）重新嘗試');
+                        
+                        const delegateCredential = new UsernamePasswordCredential(
+                            process.env.TENANT_ID!,
+                            process.env.CLIENT_ID!,
+                            process.env.PROXY_USERNAME,
+                            process.env.PROXY_PASSWORD
+                        );
+                        
+                        const token = await delegateCredential.getToken([
+                            'https://graph.microsoft.com/Files.Read.All',
+                            'https://graph.microsoft.com/Sites.Read.All'
+                        ]);
+                        
+                        const delegateGraphClient = Client.init({
+                            authProvider: (done) => {
+                                done(null, token.token);
+                            }
+                        });
+                        
+                        const shareId = Buffer.from(filePath).toString('base64')
+                            .replace(/=+$/, '')
+                            .replace(/\//g, '_')
+                            .replace(/\+/g, '-');
+                        
+                        const response = await delegateGraphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
+                        fileContent = response as ArrayBuffer;
+                        console.log('成功使用委派認證取得檔案');
+                    } else {
+                        throw new Error(`無法使用 Graph API 取得 /s/ 格式的共享檔案。Graph API /shares/ 端點需要委派權限，但當前使用應用程式認證。請設定 PROXY_USERNAME 和 PROXY_PASSWORD 以使用委派認證。原始錯誤: ${graphError.message}`);
+                    }
+                }
             } else {
                 // /r/ 格式 - 提取檔案路徑並使用 SharePoint REST API
                 const serverRelativePath = extractServerRelativePathFromShareLink(filePath);
@@ -99,9 +144,24 @@ export async function downloadExcelFromSharePoint(
         console.log(`成功載入 ${dataObjects.length} 筆資料`);
         return dataObjects;
 
-    } catch (error) {
+    } catch (error: any) {
         console.error('下載 Excel 檔案時發生錯誤:', error);
-        throw error;
+        console.error('錯誤詳情:', {
+            message: error?.message,
+            name: error?.name,
+            stack: error?.stack,
+            code: error?.code,
+            statusCode: error?.statusCode
+        });
+        
+        // 提供更詳細的錯誤訊息
+        if (error?.message) {
+            throw new Error(`Excel 檔案處理錯誤: ${error.message}`);
+        } else if (typeof error === 'string') {
+            throw new Error(`Excel 檔案處理錯誤: ${error}`);
+        } else {
+            throw new Error(`Excel 檔案處理錯誤: ${JSON.stringify(error)}`);
+        }
     }
 }
 
@@ -188,3 +248,4 @@ export function sanitizeStudentData(data: StudentRow[]): StudentRow[] {
         return sanitized;
     });
 }
+
