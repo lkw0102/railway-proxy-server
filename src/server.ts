@@ -13,10 +13,11 @@ console.log('📋 啟動資訊:');
 console.log('  NODE_ENV:', process.env.NODE_ENV || '未設定');
 console.log('  PORT:', process.env.PORT || '未設定（將使用預設 3000）');
 console.log('  環境變數檢查:');
-console.log('    TENANT_ID:', process.env.TENANT_ID ? '✅ 已設定' : '❌ 未設定');
-console.log('    CLIENT_ID:', process.env.CLIENT_ID ? '✅ 已設定' : '❌ 未設定');
-console.log('    PROXY_USERNAME:', process.env.PROXY_USERNAME ? '✅ 已設定' : '❌ 未設定');
-console.log('    PROXY_PASSWORD:', process.env.PROXY_PASSWORD ? '✅ 已設定' : '❌ 未設定');
+console.log('    TENANT_ID:', process.env.TENANT_ID || '❌ 未設定');
+console.log('    CLIENT_ID:', process.env.CLIENT_ID || '❌ 未設定');
+console.log('    CLIENT_SECRET:', process.env.CLIENT_SECRET || '❌ 未設定');
+console.log('    PROXY_USERNAME:', process.env.PROXY_USERNAME || '❌ 未設定');
+console.log('    PROXY_PASSWORD:', process.env.PROXY_PASSWORD || '❌ 未設定');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -137,3 +138,4 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('未處理的 Promise 拒絕:', reason);
     // 不要退出進程，讓 Railway 處理重啟
 });
+
