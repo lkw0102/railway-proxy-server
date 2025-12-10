@@ -139,9 +139,6 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 
         // 篩選該學生的資料
         const studentData = filterStudentData(excelData, studentId);
-        
-        // 釋放 excelData 記憶體（不再需要）
-        (excelData as any) = null;
 
         if (studentData.length === 0) {
             clearTimeout(timeout);
@@ -153,9 +150,6 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 
         // 移除敏感欄位
         const sanitizedData = sanitizeStudentData(studentData);
-        
-        // 釋放 studentData 記憶體
-        (studentData as any) = null;
 
         clearTimeout(timeout);
         const memAfter = process.memoryUsage();
