@@ -59,7 +59,20 @@ export async function downloadExcelFromSharePoint(
                     
                     console.log(`嘗試使用 Graph API 取得 /s/ 格式的共享檔案`);
                     const response = await graphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
-                    fileContent = response as ArrayBuffer;
+                    
+                    // Graph API 可能返回 Stream、Buffer 或 ArrayBuffer，需要統一轉換為 ArrayBuffer
+                    if (response instanceof ArrayBuffer) {
+                        fileContent = response;
+                    } else if (Buffer.isBuffer(response)) {
+                        fileContent = new Uint8Array(response).buffer;
+                    } else if (response instanceof Uint8Array) {
+                        fileContent = response.buffer as ArrayBuffer;
+                    } else {
+                        // 嘗試轉換為 Buffer 再轉為 ArrayBuffer
+                        const buffer = Buffer.from(response as any);
+                        fileContent = new Uint8Array(buffer).buffer;
+                    }
+                    
                     console.log('成功使用 Graph API 取得檔案');
                     logFileInfo(fileContent, 'Graph API');
                 } catch (graphError: any) {
@@ -94,7 +107,20 @@ export async function downloadExcelFromSharePoint(
                             .replace(/\+/g, '-');
                         
                         const response = await delegateGraphClient.api(`/shares/u!${shareId}/driveItem/content`).get();
-                        fileContent = response as ArrayBuffer;
+                        
+                        // Graph API 可能返回 Stream、Buffer 或 ArrayBuffer，需要統一轉換為 ArrayBuffer
+                        if (response instanceof ArrayBuffer) {
+                            fileContent = response;
+                        } else if (Buffer.isBuffer(response)) {
+                            fileContent = new Uint8Array(response).buffer;
+                        } else if (response instanceof Uint8Array) {
+                            fileContent = response.buffer as ArrayBuffer;
+                        } else {
+                            // 嘗試轉換為 Buffer 再轉為 ArrayBuffer
+                            const buffer = Buffer.from(response as any);
+                            fileContent = new Uint8Array(buffer).buffer;
+                        }
+                        
                         console.log('成功使用委派認證取得檔案');
                         logFileInfo(fileContent, '委派認證 (UsernamePasswordCredential)');
                     } else {
