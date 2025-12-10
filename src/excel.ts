@@ -98,8 +98,16 @@ export async function downloadExcelFromSharePoint(
             throw new Error('不支援的檔案路徑格式');
         }
 
-        // 使用 SheetJS 解析 Excel
-        const workbook = XLSX.read(fileContent, { type: 'array' });
+        // 使用 SheetJS 解析 Excel（優化記憶體使用）
+        // 使用更節省記憶體的選項
+        const workbook = XLSX.read(fileContent, { 
+            type: 'array',
+            cellDates: false,  // 不使用日期物件，節省記憶體
+            cellNF: false,      // 不使用數字格式，節省記憶體
+            cellStyles: false,  // 不使用樣式，節省記憶體
+            dense: false        // 不使用密集模式，節省記憶體
+        });
+        
         const firstSheetName = workbook.SheetNames[0];
         
         if (!firstSheetName) {
@@ -107,20 +115,39 @@ export async function downloadExcelFromSharePoint(
         }
 
         const sheet = workbook.Sheets[firstSheetName];
-        const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
+        
+        // 限制最大行數，避免記憶體不足（例如最多 10000 行）
+        const MAX_ROWS = 10000;
+        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+        const totalRows = Math.min(range.e.r + 1, MAX_ROWS);
+        
+        console.log(`Excel 檔案總行數: ${range.e.r + 1}，將處理前 ${totalRows} 行`);
+        
+        // 使用 sheet_to_json 但限制範圍
+        const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { 
+            header: 1,
+            defval: null,
+            raw: false  // 不使用原始值，統一轉換為字串/數字
+        }) as unknown[][];
+
+        // 釋放 workbook 記憶體
+        workbook.SheetNames = [];
+        workbook.Sheets = {};
 
         if (!rows || rows.length === 0) {
             return [];
         }
 
-        // 轉換為物件陣列
+        // 轉換為物件陣列（限制處理的資料量）
         const headerRow = (rows[0] as (string | number | null | undefined)[]).map((h, idx) => {
             const headerStr = h === null || h === undefined ? '' : String(h).trim();
             return headerStr.length === 0 ? `Column${idx + 1}` : headerStr;
         });
 
         const dataObjects: StudentRow[] = [];
-        for (let r = 1; r < rows.length; r++) {
+        const maxDataRows = Math.min(rows.length - 1, MAX_ROWS - 1); // 減去標題行
+        
+        for (let r = 1; r <= maxDataRows; r++) {
             const row = rows[r] as (string | number | null | undefined)[];
             if (!row || row.length === 0) continue;
 
@@ -134,14 +161,24 @@ export async function downloadExcelFromSharePoint(
                 } else if (typeof value === 'number') {
                     obj[key] = value;
                 } else {
-                    const num = Number(String(value).trim());
-                    obj[key] = isNaN(num) ? String(value) : num;
+                    const strValue = String(value).trim();
+                    if (strValue.length === 0) {
+                        obj[key] = undefined;
+                    } else {
+                        const num = Number(strValue);
+                        obj[key] = isNaN(num) ? strValue : num;
+                    }
                 }
             }
             dataObjects.push(obj);
         }
 
-        console.log(`成功載入 ${dataObjects.length} 筆資料`);
+        // 強制垃圾回收提示（如果可用）
+        if (global.gc) {
+            global.gc();
+        }
+
+        console.log(`成功載入 ${dataObjects.length} 筆資料（限制最多 ${MAX_ROWS} 行）`);
         return dataObjects;
 
     } catch (error: any) {

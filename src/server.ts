@@ -93,11 +93,24 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
     // 確保 CORS 標頭已設定
     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.header('Access-Control-Allow-Credentials', 'true');
+    
+    // 設置請求超時（30 秒）
+    const timeout = setTimeout(() => {
+        if (!res.headersSent) {
+            console.error('請求超時（30 秒）');
+            res.status(504).json({
+                success: false,
+                error: '請求處理超時，請稍後再試'
+            } as StudentGradeResponse);
+        }
+    }, 30000);
+    
     try {
         const { studentId, excelFilePath } = req.body as StudentGradeRequest;
 
         // 驗證請求參數
         if (!studentId || !excelFilePath) {
+            clearTimeout(timeout);
             return res.status(400).json({
                 success: false,
                 error: '缺少必要參數: studentId 或 excelFilePath'
@@ -106,11 +119,18 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 
         console.log(`處理學生 ${studentId} 的成績請求`);
         console.log(`檔案路徑: ${excelFilePath}`);
+        const startTime = Date.now();
+        
+        // 記錄記憶體使用情況
+        const memBefore = process.memoryUsage();
+        console.log(`記憶體使用（處理前）: RSS=${Math.round(memBefore.rss / 1024 / 1024)}MB, HeapUsed=${Math.round(memBefore.heapUsed / 1024 / 1024)}MB`);
 
         // 下載並解析 Excel
         const excelData = await downloadExcelFromSharePoint(excelFilePath);
+        console.log(`Excel 下載完成，耗時: ${Date.now() - startTime}ms`);
 
         if (!excelData || excelData.length === 0) {
+            clearTimeout(timeout);
             return res.status(404).json({
                 success: false,
                 error: '找不到 Excel 資料'
@@ -119,8 +139,12 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 
         // 篩選該學生的資料
         const studentData = filterStudentData(excelData, studentId);
+        
+        // 釋放 excelData 記憶體（不再需要）
+        (excelData as any) = null;
 
         if (studentData.length === 0) {
+            clearTimeout(timeout);
             return res.status(404).json({
                 success: false,
                 error: `找不到學生 ${studentId} 的成績資料`
@@ -129,7 +153,15 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
 
         // 移除敏感欄位
         const sanitizedData = sanitizeStudentData(studentData);
+        
+        // 釋放 studentData 記憶體
+        (studentData as any) = null;
 
+        clearTimeout(timeout);
+        const memAfter = process.memoryUsage();
+        console.log(`記憶體使用（處理後）: RSS=${Math.round(memAfter.rss / 1024 / 1024)}MB, HeapUsed=${Math.round(memAfter.heapUsed / 1024 / 1024)}MB`);
+        console.log(`請求處理完成，總耗時: ${Date.now() - startTime}ms`);
+        
         // 返回成功回應
         res.json({
             success: true,
@@ -138,6 +170,7 @@ app.post('/api/getStudentGrade', async (req: Request, res: Response) => {
         } as StudentGradeResponse);
 
     } catch (error: any) {
+        clearTimeout(timeout);
         console.error('處理請求時發生錯誤:', error);
         console.error('錯誤堆疊:', error.stack);
         
