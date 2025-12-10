@@ -29,6 +29,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// 請求日誌中介軟體（用於診斷）
+app.use((req: Request, res: Response, next: Function) => {
+    console.log(`📥 收到請求: ${req.method} ${req.path} - ${new Date().toISOString()}`);
+    next();
+});
+
 // 健康檢查端點
 app.get('/health', (req: Request, res: Response) => {
     res.json({ 
