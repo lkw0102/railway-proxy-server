@@ -2,7 +2,7 @@
 # Railway 會自動使用此配置來建置專案
 
 [phases.setup]
-nixPkgs = ["nodejs-18_x"]
+nixPkgs = ["nodejs_20", "npm"]
 
 [phases.install]
 cmds = ["npm ci"]
